@@ -10,8 +10,8 @@ namespace ADXReg2Inf
     {
         static void Main(string[] args)
         {
-            string inputDir = @"C:\IT-Repos\GetLumiaBSP\GetLumiaBSP\bin\Debug\out\Registry";
-            string outputDir = @"E:\Happanero_8.1_ARM64\L950XL";
+            string inputDir = @"C:\950XL_BSP\Registry";
+            string outputDir = @"C:\950XL_BSP\Test";
 
             var files = System.IO.Directory.EnumerateFiles(inputDir, "*.reg", System.IO.SearchOption.TopDirectoryOnly).ToList();
 
@@ -35,7 +35,7 @@ namespace ADXReg2Inf
 
                 if (inf.Infs.Count > 0)
                 {
-                    var result = Reg2Inf.ExportInf(inf, file.Split('\\').Last(), outputDir);
+                    var result = Reg2Inf.ExportInf(inf, file.Split('\\').Last(), outputDir, true);
                     if (result)
                         Console.WriteLine($"(reg2inf) Exported to {file.Split('\\').Last().Replace(".reg", "")}");
                     else

@@ -48,6 +48,13 @@ namespace ADXReg2Inf
         public string ServiceName { get; set; }
         public List<string> Properties { get; set; }
         public List<string> Keys { get; set; }
+        public List<Interface> Interfaces { get; set; }
+    }
+
+    public class Interface
+    {
+        public string KSCategoryGuid { get; set; }
+        public List<Tuple<string, List<string>>> RefKeys { get; set; }
     }
 
     public class Descriptor

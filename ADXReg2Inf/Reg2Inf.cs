@@ -93,7 +93,7 @@ namespace ADXReg2Inf
                                 {
                                     Manufacturer = (descs[0].Value["Manufacturer"] as string).Replace("\"", ""),
                                     Description = (descs[0].Value["Description"] as string).Replace("\"", ""),
-                                    Configuration = (descs[0].Value["Configuration"] as string).Replace("\"", "")
+                                    Configuration = (descs[0].Value["Configuration"] as string).Replace("\"", ""),
                                 };
 
                                 inf.Manufacturer = (descs[0].Value["Manufacturer"] as string).Replace("\"", "");
@@ -109,18 +109,20 @@ namespace ADXReg2Inf
                                         Properties = new List<string>(),
                                         Keys = new List<string>(),
                                         ServiceName = (conf.Value["Service"] as string).Replace("\"", ""),
+                                        Interfaces = new List<Interface>(),
                                         FromDeviceID = deviceId
                                     };
 
                                     desc.LinkedServiceName = (conf.Value["Service"] as string).Replace("\"", "");
 
+                                    //NEWLY ADDED SUPPORT FOR INTERFACES.
+                                    var interfaces = GetDriverPackagesConfigurationInterfaces(reg, inf.PackageName, desc.Configuration);
+                                    config.Interfaces.AddRange(Helper.GetConvertedRegKeysIntoInfKeysForInterfaces(interfaces));
+
                                     var props = GetDriverPackagesConfigurationProperties(reg, inf.PackageName, desc.Configuration);
-
-
                                     config.Properties.AddRange(Helper.GetConvertedRegKeysIntoInfKeysForProperties(props));
 
                                     var keys = GetDriverPackagesConfigurationGeneric(reg, inf.PackageName, desc.Configuration);
-
                                     config.Keys.AddRange(Helper.GetConvertedRegKeysIntoInfKeys(keys, RegHive.HKR, desc.Configuration.ToUpper(), baseInf));
 
                                     inf.Configurations.Add(config);
@@ -289,6 +291,7 @@ namespace ADXReg2Inf
             }
             catch (Exception ex)
             {
+                Console.WriteLine(ex.Message);
                 return null;
             }
         }
@@ -301,7 +304,7 @@ namespace ADXReg2Inf
                 baseInf.Infs.ForEach(inf => {
 
                     if (forceArm64)
-                        inf.PackageName = inf.PackageName.Replace("arm_", "arm64_");
+                        inf.PackageName = inf.PackageName.ToLower().Replace("arm_", "arm64_");
 
                     List<string> Sys32_Driver_List = new List<string>();
                     List<string> Sys32_List = new List<string>();
@@ -340,6 +343,8 @@ namespace ADXReg2Inf
                             else if (code == DirCodes.System32)
                                 Sys32_List.Add(file.Split('/').Last()); //Drivers_Dir_11
                         });
+
+                        //NEEDS FIXES
 
                         if (Sys32_Driver_List.Count > 0)
                             sb.AppendLine("Drivers_Dir_12=12");
@@ -511,12 +516,16 @@ namespace ADXReg2Inf
         public static List<KeyValuePair<string, Hashtable>> GetDriverPackagesConfigurationProperties(Dictionary<string, Hashtable> reg, string packageName, string configName)
            => reg.Where(s => s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\PROPERTIES")).ToList();
 
+        public static List<KeyValuePair<string, Hashtable>> GetDriverPackagesConfigurationInterfaces(Dictionary<string, Hashtable> reg, string packageName, string configName)
+           => reg.Where(s => s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\INTERFACES")).ToList();
+
         public static List<KeyValuePair<string, Hashtable>> GetDriverPackagesConfigurationServices(Dictionary<string, Hashtable> reg, string packageName, string configName, string serviceName)
            => reg.Where(s => s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\SERVICES\" + serviceName.ToUpper())).ToList();
 
         public static List<KeyValuePair<string, Hashtable>> GetDriverPackagesConfigurationGeneric(Dictionary<string, Hashtable> reg, string packageName, string configName)
            => reg.Where(s => s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\") &&
                             !(s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\PROPERTIES")) &&
+                            !(s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\INTERFACES")) &&
                             !(s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\PROPERTIES\WDF")) &&
                             !(s.Key.ToUpper().Contains(@"DRIVERDATABASE\DRIVERPACKAGES\" + packageName.ToUpper() + @"\CONFIGURATIONS\" + configName.ToUpper() + @"\SERVICES"))).ToList();
 
@@ -685,6 +694,45 @@ namespace ADXReg2Inf
             return list;
         }
 
+        public static List<string> ConvertKeysInterfaces(List<KeyValuePair<string, Hashtable>> regs, string preVal)
+        {
+            var list = new List<string>();
+
+            regs.ForEach(reg =>
+            {
+                foreach (DictionaryEntry keynamevalue in reg.Value)
+                {
+                    var key = (keynamevalue.Key as string).Replace("@", "");
+
+                    if ((keynamevalue.Value as string).ToLower().Contains("dword:")) //REG_DWORD
+                        list.Add(preVal + "," + key + "," + "0x00010001,0x" + (keynamevalue.Value as string).Split(':')[1]);
+                    else if ((keynamevalue.Value as string).ToLower().Contains("hex:")) //REG_BINARY
+                        list.Add(preVal + "," + key + "," + "0x00000001," + string.Join(",", CleanSplitHexString(keynamevalue.Value as string)));
+                    else if ((keynamevalue.Value as string).ToLower().Contains("\"")) //REG_SZ
+                        list.Add(preVal + "," + key + "," + "," + (keynamevalue.Value as string).Replace("\\\\", "\\")); //No need for 0x00000000
+                    else if ((keynamevalue.Value as string).ToLower().Contains("hex(2)")) //REG_MULTI_SZ
+                        list.Add(preVal + "," + key + "," + "0x00020000,\"" + StringArrayHexToString(CleanSplitHexString(keynamevalue.Value as string)).Replace("%", "%%") + "\"");
+                    else if ((keynamevalue.Value as string).ToLower().Contains("hex(7)")) //REG_EXPAND_SZ
+                    {
+                        string tmp = "";
+                        StringArrayHexToString(CleanSplitHexString(keynamevalue.Value as string)).Replace("\r", "").Split('\n').ToList().ForEach(s => tmp += $"\"{s}\",");
+
+                        if (tmp.EndsWith(","))
+                            tmp = tmp.Substring(0, tmp.Length - 1);
+
+                        list.Add(preVal + "," + key + "," + "0x00010000," + tmp);
+                    }
+                    else
+                    {
+                        Console.WriteLine("(reg2inf) unrecognized key: " + keynamevalue.Value);
+                    }
+
+                }
+            });
+
+            return list;
+        }
+
         public static List<string> GetConvertedRegKeysIntoInfKeysForProperties(List<KeyValuePair<string, Hashtable>> regs)
         {
             var list = new List<string>();
@@ -697,6 +745,47 @@ namespace ADXReg2Inf
                 {
                     var cos = (keynamevalue.Value as string).Split(':');
                     list.Add(k + "," + CleanHexString(cos[0]) + ",," + cos[1].Split(',')[0]);
+                }
+            });
+
+            return list;
+        }
+
+        public static List<Interface> GetConvertedRegKeysIntoInfKeysForInterfaces(List<KeyValuePair<string, Hashtable>> regs)
+        {
+            var list = new List<Interface>();
+
+            regs.ForEach(reg =>
+            {
+                //BIG TODO: fix this.
+                if (!(reg.Key.ToUpper().Contains("PROPERTIES") && reg.Key.ToUpper().Contains("\\0002")))
+                {
+                    var k = reg.Key.GetPartAfterTo("INTERFACES").Split('\\');
+                    var ksCat = k[0].Split('#')[0];
+                    var @ref = k[0].Split('#')[1];
+                    var regKey = string.Join("\\", k.Skip(1)).ToUpper().Replace("DEVICE", "");
+                    if (regKey.StartsWith("\\"))
+                        regKey = regKey.Substring(1);
+
+                    if (list.FindIndex(interf => interf.KSCategoryGuid == ksCat) == -1)
+                        list.Add(new Interface { KSCategoryGuid = ksCat, RefKeys = new List<Tuple<string, List<string>>>() });
+
+                    var index = list.FindIndex(interf => interf.KSCategoryGuid == ksCat && interf.RefKeys.FindIndex(itm => itm.Item1 == @ref) != -1);
+                    if (index == -1)
+                    {
+                        var res = ConvertKeysInterfaces(new List<KeyValuePair<string, Hashtable>> { reg }, $"HKR,{regKey}");
+                        list[list.FindIndex(interf => interf.KSCategoryGuid == ksCat)].RefKeys.Add(new Tuple<string, List<string>>(@ref, res));
+                    }
+                    else
+                    {
+                        //GARBAGE
+                        //TRUCKLOAD OF GARBAGE
+                        var el = list[index];
+
+                        var res = ConvertKeysInterfaces(new List<KeyValuePair<string, Hashtable>>{ reg }, $"HKR,{regKey}");
+
+                        el.RefKeys[el.RefKeys.FindIndex(itm => itm.Item1 == @ref)].Item2.AddRange(res);
+                    }
                 }
             });
 
